@@ -46,6 +46,21 @@ export function registerMetadataTools(server: McpServer, client: BacklogClient):
   );
 
   server.registerTool(
+    "backlog_get_statuses",
+    {
+      title: "Get issue statuses",
+      description:
+        "Return the issue statuses of the configured project (e.g. Open, In Progress, Resolved, Closed, plus any custom statuses). " +
+        "Use these ids as statusIds when listing issues with backlog_list_issues.",
+      inputSchema: {},
+    },
+    safeHandler(async () => {
+      const statuses = await client.getStatuses();
+      return jsonResult(statuses.map((s) => ({ id: s.id, name: s.name, color: s.color })));
+    })
+  );
+
+  server.registerTool(
     "backlog_get_milestones",
     {
       title: "Get milestones",

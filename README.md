@@ -175,7 +175,9 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_get_issue_types` | Read — issue types + IDs |
 | `backlog_get_priorities` | Read — priorities + IDs |
 | `backlog_get_categories` | Read — project categories |
+| `backlog_get_statuses` | Read — project issue statuses (Open, In Progress, Resolved, …) + IDs |
 | `backlog_get_milestones` | Read — project milestones/versions |
+| `backlog_list_issues` | Read — list/search issues, filterable by status name or id, assignee, keyword; paged |
 | `backlog_validate_issues` | Read — dry-run validation + preview, creates nothing |
 | `backlog_create_issue` | **Write** — creates one issue |
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |

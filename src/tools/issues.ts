@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { BacklogApiError, type BacklogClient } from "../backlog/client.js";
+import { BacklogApiError, type BacklogClient, type QueryParams } from "../backlog/client.js";
 import { createIssue, issueUrl, updateIssue } from "../backlog/issues.js";
 import type { BacklogIssue, IssueUpdate, ProposedIssue } from "../backlog/types.js";
 import { errorResult, jsonResult, safeHandler } from "./helpers.js";
@@ -214,11 +214,123 @@ async function validateIssue(
 const BATCH_DELAY_MS = 1_000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const listIssuesShape = {
+  statusIds: z
+    .array(z.number().int().positive())
+    .optional()
+    .describe("Filter by status ids (from backlog_get_statuses). Omit both status filters to get all statuses."),
+  statusNames: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Filter by status names, case-insensitive, e.g. ["Open", "In Progress", "Resolved"].'),
+  assigneeIds: z
+    .array(z.number().int().positive())
+    .optional()
+    .describe("Filter by assignee user ids (from backlog_get_users)."),
+  keyword: z.string().min(1).optional().describe("Full-text keyword filter."),
+  sort: z.enum(["created", "updated", "dueDate", "priority", "status"]).optional(),
+  order: z.enum(["asc", "desc"]).optional().describe("Default desc."),
+  count: z.number().int().min(1).max(100).optional().describe("Page size, 1-100 (default 20)."),
+  offset: z.number().int().min(0).optional().describe("Skip this many issues (for paging)."),
+};
+
+interface ListIssuesArgs {
+  statusIds?: number[];
+  statusNames?: string[];
+  assigneeIds?: number[];
+  keyword?: string;
+  sort?: "created" | "updated" | "dueDate" | "priority" | "status";
+  order?: "asc" | "desc";
+  count?: number;
+  offset?: number;
+}
+
 export function registerIssueTools(
   server: McpServer,
   client: BacklogClient,
   baseUrl: string
 ): void {
+  server.registerTool(
+    "backlog_list_issues",
+    {
+      title: "List Backlog issues",
+      description:
+        "Read-only: list issues of the configured project, optionally filtered by status " +
+        "(e.g. Open, In Progress, Resolved, Closed), assignee, or keyword. " +
+        "Returns paged results plus the total match count; use offset to fetch the next page.",
+      inputSchema: listIssuesShape,
+    },
+    safeHandler(async (args: ListIssuesArgs) => {
+      const project = await client.getProject();
+
+      const statusIds = [...(args.statusIds ?? [])];
+      if (args.statusNames?.length) {
+        const statuses = await client.getStatuses();
+        const byName = new Map(statuses.map((s) => [s.name.toLowerCase(), s.id]));
+        const unknown = args.statusNames.filter(
+          (name) => !byName.has(name.trim().toLowerCase())
+        );
+        if (unknown.length > 0) {
+          return errorResult(
+            new BacklogApiError(
+              `Unknown status name(s): ${unknown.join(", ")}. ` +
+                `This project's statuses are: ${statuses.map((s) => s.name).join(", ")}.`
+            )
+          );
+        }
+        for (const name of args.statusNames) {
+          statusIds.push(byName.get(name.trim().toLowerCase())!);
+        }
+      }
+
+      const filters: QueryParams = { "projectId[]": [String(project.id)] };
+      if (statusIds.length > 0) {
+        filters["statusId[]"] = [...new Set(statusIds)].map(String);
+      }
+      if (args.assigneeIds?.length) {
+        filters["assigneeId[]"] = args.assigneeIds.map(String);
+      }
+      if (args.keyword) filters.keyword = args.keyword;
+
+      const count = args.count ?? 20;
+      const offset = args.offset ?? 0;
+      const [issues, total] = await Promise.all([
+        client.getIssues({
+          ...filters,
+          sort: args.sort ?? "updated",
+          order: args.order ?? "desc",
+          count: String(count),
+          offset: String(offset),
+        }),
+        client.countIssues(filters),
+      ]);
+
+      return jsonResult({
+        project: client.projectKey,
+        total: total.count,
+        returned: issues.length,
+        offset,
+        hasMore: offset + issues.length < total.count,
+        issues: issues.map((issue) => ({
+          issueKey: issue.issueKey,
+          summary: issue.summary,
+          status: issue.status.name,
+          issueType: issue.issueType.name,
+          priority: issue.priority.name,
+          assignee: issue.assignee?.name ?? null,
+          startDate: issue.startDate,
+          dueDate: issue.dueDate,
+          estimatedHours: issue.estimatedHours,
+          categories: issue.category.map((c) => c.name),
+          milestones: issue.milestone.map((m) => m.name),
+          parentIssueId: issue.parentIssueId,
+          updated: issue.updated,
+          url: issueUrl(baseUrl, issue.issueKey),
+        })),
+      });
+    })
+  );
+
   server.registerTool(
     "backlog_validate_issues",
     {

@@ -1,11 +1,16 @@
 import type {
   BacklogCategory,
+  BacklogIssue,
   BacklogIssueType,
   BacklogPriority,
   BacklogProject,
+  BacklogStatus,
   BacklogUser,
   BacklogVersion,
 } from "./types.js";
+
+/** Query params for GET endpoints; array values become repeated `name` params. */
+export type QueryParams = Record<string, string | string[]>;
 
 /** Error safe to surface to MCP clients: never contains the API key. */
 export class BacklogApiError extends Error {
@@ -38,11 +43,15 @@ export class BacklogClient {
     return text.split(this.apiKey).join("[REDACTED]");
   }
 
-  private buildUrl(path: string, query?: Record<string, string>): URL {
+  private buildUrl(path: string, query?: QueryParams): URL {
     const url = new URL(`${this.baseUrl}/api/v2${path}`);
     url.searchParams.set("apiKey", this.apiKey);
     for (const [k, v] of Object.entries(query ?? {})) {
-      url.searchParams.set(k, v);
+      if (Array.isArray(v)) {
+        for (const item of v) url.searchParams.append(k, item);
+      } else {
+        url.searchParams.set(k, v);
+      }
     }
     return url;
   }
@@ -50,7 +59,7 @@ export class BacklogClient {
   private async request<T>(
     method: "GET" | "POST" | "PATCH",
     path: string,
-    options: { query?: Record<string, string>; form?: URLSearchParams } = {}
+    options: { query?: QueryParams; form?: URLSearchParams } = {}
   ): Promise<T> {
     const url = this.buildUrl(path, options.query);
 
@@ -174,8 +183,20 @@ export class BacklogClient {
     return this.request("GET", `/projects/${encodeURIComponent(this.projectKey)}/versions`);
   }
 
+  getStatuses(): Promise<BacklogStatus[]> {
+    return this.request("GET", `/projects/${encodeURIComponent(this.projectKey)}/statuses`);
+  }
+
   getIssue<T>(issueIdOrKey: string | number): Promise<T> {
     return this.request("GET", `/issues/${encodeURIComponent(String(issueIdOrKey))}`);
+  }
+
+  getIssues(query: QueryParams): Promise<BacklogIssue[]> {
+    return this.request("GET", "/issues", { query });
+  }
+
+  countIssues(query: QueryParams): Promise<{ count: number }> {
+    return this.request("GET", "/issues/count", { query });
   }
 
   postForm<T>(path: string, form: URLSearchParams): Promise<T> {

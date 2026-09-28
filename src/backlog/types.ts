@@ -49,6 +49,14 @@ export interface BacklogVersion {
   archived: boolean;
 }
 
+export interface BacklogStatus {
+  id: number;
+  projectId: number;
+  name: string;
+  color: string;
+  displayOrder: number;
+}
+
 export interface BacklogIssue {
   id: number;
   projectId: number;
@@ -57,6 +65,7 @@ export interface BacklogIssue {
   summary: string;
   parentIssueId: number | null;
   issueType: BacklogIssueType;
+  status: BacklogStatus;
   priority: BacklogPriority;
   assignee: BacklogUser | null;
   startDate: string | null;
@@ -64,6 +73,8 @@ export interface BacklogIssue {
   estimatedHours: number | null;
   category: BacklogCategory[];
   milestone: BacklogVersion[];
+  created: string;
+  updated: string | null;
 }
 
 /** Input shape for updating an issue: every field optional, only provided ones are sent. */
