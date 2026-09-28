@@ -77,6 +77,15 @@ export interface BacklogIssue {
   updated: string | null;
 }
 
+/** Full issue detail as returned by GET /api/v2/issues/:issueIdOrKey. */
+export interface BacklogIssueDetail extends BacklogIssue {
+  description: string | null;
+  resolution: { id: number; name: string } | null;
+  actualHours: number | null;
+  createdUser: BacklogUser | null;
+  updatedUser: BacklogUser | null;
+}
+
 /** Input shape for updating an issue: every field optional, only provided ones are sent. */
 export interface IssueUpdate {
   summary?: string;

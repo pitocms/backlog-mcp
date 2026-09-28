@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { BacklogApiError, type BacklogClient, type QueryParams } from "../backlog/client.js";
 import { createIssue, issueUrl, updateIssue } from "../backlog/issues.js";
-import type { BacklogIssue, IssueUpdate, ProposedIssue } from "../backlog/types.js";
+import type {
+  BacklogIssue,
+  BacklogIssueDetail,
+  IssueUpdate,
+  ProposedIssue,
+} from "../backlog/types.js";
 import { errorResult, jsonResult, safeHandler } from "./helpers.js";
 
 const dateSchema = z
@@ -327,6 +332,43 @@ export function registerIssueTools(
           updated: issue.updated,
           url: issueUrl(baseUrl, issue.issueKey),
         })),
+      });
+    })
+  );
+
+  server.registerTool(
+    "backlog_get_issue",
+    {
+      title: "Get ONE Backlog issue",
+      description:
+        "Read-only: fetch the full details of a single issue by issue ID or issue key " +
+        "(e.g. LMSDEV-80), including its description.",
+      inputSchema: { issueIdOrKey: issueIdOrKeySchema },
+    },
+    safeHandler(async ({ issueIdOrKey }: { issueIdOrKey: string }) => {
+      const issue = await client.getIssue<BacklogIssueDetail>(issueIdOrKey);
+      return jsonResult({
+        issueId: issue.id,
+        issueKey: issue.issueKey,
+        summary: issue.summary,
+        description: issue.description,
+        status: issue.status.name,
+        issueType: issue.issueType.name,
+        priority: issue.priority.name,
+        resolution: issue.resolution?.name ?? null,
+        assignee: issue.assignee?.name ?? null,
+        startDate: issue.startDate,
+        dueDate: issue.dueDate,
+        estimatedHours: issue.estimatedHours,
+        actualHours: issue.actualHours,
+        categories: issue.category.map((c) => c.name),
+        milestones: issue.milestone.map((m) => m.name),
+        parentIssueId: issue.parentIssueId,
+        createdUser: issue.createdUser?.name ?? null,
+        created: issue.created,
+        updatedUser: issue.updatedUser?.name ?? null,
+        updated: issue.updated,
+        url: issueUrl(baseUrl, issue.issueKey),
       });
     })
   );
