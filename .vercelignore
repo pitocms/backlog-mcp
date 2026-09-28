@@ -5,3 +5,5 @@ dist
 node_modules
 Dockerfile
 docker-compose.yml
+# Unused legacy entrypoint: Vercel's Express preset uses src/app.ts directly.
+api

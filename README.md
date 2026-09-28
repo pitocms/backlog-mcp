@@ -65,7 +65,7 @@ To run without Docker: `npm install && npm run build && npm start`.
 
 ## 2b. Deploy to Vercel (alternative to Docker)
 
-The same app runs as a Vercel serverless function via [api/index.ts](api/index.ts) — `vercel.json` rewrites all paths to it, so `/mcp` and `/health` work unchanged. The MCP endpoint runs in stateless mode with buffered JSON responses, which fits serverless.
+Vercel's zero-config [Express preset](https://vercel.com/docs/frameworks/backend/express) detects [src/app.ts](src/app.ts) (which default-exports the Express app) and runs the whole app as a single Vercel Function on Fluid compute — `/mcp` and `/health` work unchanged, no rewrites needed. The MCP endpoint runs in stateless mode with buffered JSON responses, which fits serverless.
 
 ```bash
 npm i -g vercel
@@ -81,7 +81,7 @@ Then check `https://<your-deployment>.vercel.app/health` and point your MCP clie
 Notes:
 
 - `.vercelignore` excludes `.env`, so the API key only reaches Vercel through `vercel env add`.
-- `maxDuration` is set to 300s in `vercel.json` (requires Fluid compute, the default on current plans). Large batches wait 1s between writes, so keep batch sizes such that they finish within your plan's limit (~200 issues at 300s).
+- Fluid compute's default max duration is 300s. Large batches wait 1s between writes, so keep batch sizes such that they finish within your plan's limit (~200 issues at 300s).
 - The warning below about authentication applies doubly here: a Vercel URL is public. Keep the URL secret or put the function behind auth before real use.
 
 ## 3. Test Backlog connectivity
@@ -187,11 +187,9 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 ## Project structure
 
 ```text
-api/
-└── index.ts          # Vercel serverless entrypoint (exports the Express app)
 src/
 ├── index.ts          # Standalone entrypoint (Docker / npm start)
-├── app.ts            # Express app, MCP transport, health check
+├── app.ts            # Express app, MCP transport, health check; default export = Vercel entrypoint
 ├── config.ts         # Environment validation (Zod)
 ├── backlog/
 │   ├── client.ts     # Backlog API v2 client: auth, errors, rate limits, key redaction

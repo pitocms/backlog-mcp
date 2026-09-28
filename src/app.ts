@@ -75,3 +75,7 @@ const methodNotAllowed = (_req: express.Request, res: express.Response) => {
 };
 app.get("/mcp", methodNotAllowed);
 app.delete("/mcp", methodNotAllowed);
+
+// Vercel's Express preset uses src/app.ts as the entrypoint and requires the
+// app to be the module's default export. Docker/npm start use src/index.ts.
+export default app;
