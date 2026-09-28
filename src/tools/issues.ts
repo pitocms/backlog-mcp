@@ -34,6 +34,12 @@ const issueUpdateShape = {
   issueTypeId: z.number().int().positive().optional(),
   summary: z.string().min(1).max(255).optional(),
   description: z.string().optional(),
+  statusId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("New status id (from backlog_get_statuses), e.g. Open, In Progress, Resolved, Closed."),
   priorityId: z.number().int().positive().optional(),
   assigneeId: z.number().int().positive().optional(),
   startDate: dateSchema.optional(),
@@ -509,7 +515,8 @@ export function registerIssueTools(
       title: "Update ONE Backlog issue",
       description:
         "Update an existing Backlog issue by issue ID or issue key (e.g. LMSDEV-80). " +
-        "Only the fields provided are changed; categoryIds/milestoneIds replace the current lists " +
+        "Only the fields provided are changed, including the status (statusId, via backlog_get_statuses); " +
+        "categoryIds/milestoneIds replace the current lists " +
         "(empty array clears them). Only call this after the user explicitly approved the change.",
       inputSchema: { issueIdOrKey: issueIdOrKeySchema, ...issueUpdateShape },
     },

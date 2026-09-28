@@ -8,6 +8,7 @@ import { registerProjectTools } from "./tools/project.js";
 import { registerUserTools } from "./tools/users.js";
 import { registerMetadataTools } from "./tools/metadata.js";
 import { registerIssueTools } from "./tools/issues.js";
+import { registerCommentTools } from "./tools/comments.js";
 
 export const config = loadConfig();
 const client = new BacklogClient(config.baseUrl, config.apiKey, config.projectKey);
@@ -21,6 +22,7 @@ function createMcpServer(): McpServer {
   registerUserTools(server, client);
   registerMetadataTools(server, client);
   registerIssueTools(server, client, config.baseUrl);
+  registerCommentTools(server, client, config.baseUrl);
   return server;
 }
 

@@ -34,6 +34,7 @@ export function buildIssueUpdateForm(update: IssueUpdate): URLSearchParams {
 
   if (update.summary !== undefined) form.set("summary", update.summary);
   if (update.description !== undefined) form.set("description", update.description);
+  if (update.statusId !== undefined) form.set("statusId", String(update.statusId));
   if (update.issueTypeId !== undefined) form.set("issueTypeId", String(update.issueTypeId));
   if (update.priorityId !== undefined) form.set("priorityId", String(update.priorityId));
   if (update.assigneeId !== undefined) form.set("assigneeId", String(update.assigneeId));

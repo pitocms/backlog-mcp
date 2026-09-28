@@ -77,6 +77,14 @@ export interface BacklogIssue {
   updated: string | null;
 }
 
+export interface BacklogComment {
+  id: number;
+  content: string | null;
+  createdUser: BacklogUser | null;
+  created: string;
+  updated: string | null;
+}
+
 /** Full issue detail as returned by GET /api/v2/issues/:issueIdOrKey. */
 export interface BacklogIssueDetail extends BacklogIssue {
   description: string | null;
@@ -90,6 +98,7 @@ export interface BacklogIssueDetail extends BacklogIssue {
 export interface IssueUpdate {
   summary?: string;
   description?: string;
+  statusId?: number;
   issueTypeId?: number;
   priorityId?: number;
   assigneeId?: number;

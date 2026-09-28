@@ -1,5 +1,6 @@
 import type {
   BacklogCategory,
+  BacklogComment,
   BacklogIssue,
   BacklogIssueType,
   BacklogPriority,
@@ -197,6 +198,17 @@ export class BacklogClient {
 
   countIssues(query: QueryParams): Promise<{ count: number }> {
     return this.request("GET", "/issues/count", { query });
+  }
+
+  getIssueComments(issueIdOrKey: string, query?: QueryParams): Promise<BacklogComment[]> {
+    return this.request("GET", `/issues/${encodeURIComponent(issueIdOrKey)}/comments`, { query });
+  }
+
+  getIssueComment(issueIdOrKey: string, commentId: number): Promise<BacklogComment> {
+    return this.request(
+      "GET",
+      `/issues/${encodeURIComponent(issueIdOrKey)}/comments/${commentId}`
+    );
   }
 
   postForm<T>(path: string, form: URLSearchParams): Promise<T> {

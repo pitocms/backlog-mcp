@@ -213,10 +213,12 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_get_milestones` | Read — project milestones/versions |
 | `backlog_list_issues` | Read — list/search issues, filterable by status name or id, assignee, keyword; paged |
 | `backlog_get_issue` | Read — full details of one issue by ID or key, including description |
+| `backlog_list_comments` | Read — comments of one issue, paged, newest first |
+| `backlog_add_comment` | **Write** — adds a comment to an issue; with `replyToCommentId` it quotes the original and notifies its author |
 | `backlog_validate_issues` | Read — dry-run validation + preview, creates nothing |
 | `backlog_create_issue` | **Write** — creates one issue |
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |
-| `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`) |
+| `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`), including its status via `statusId` |
 | `backlog_update_issues_batch` | **Write** — updates many issues sequentially, requires `confirmedByUser: true` |
 | `backlog_add_milestone` | **Write** — creates a milestone/version (name, description, start/release dates) |
 | `backlog_update_milestone` | **Write** — renames/updates/archives an existing milestone by id |
