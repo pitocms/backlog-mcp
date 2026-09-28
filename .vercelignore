@@ -1,0 +1,7 @@
+# Never upload secrets or build output to Vercel.
+.env
+.env.*
+dist
+node_modules
+Dockerfile
+docker-compose.yml

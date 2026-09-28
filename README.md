@@ -63,6 +63,27 @@ docker compose ps   # STATUS should show "healthy" after ~10s
 
 To run without Docker: `npm install && npm run build && npm start`.
 
+## 2b. Deploy to Vercel (alternative to Docker)
+
+The same app runs as a Vercel serverless function via [api/index.ts](api/index.ts) — `vercel.json` rewrites all paths to it, so `/mcp` and `/health` work unchanged. The MCP endpoint runs in stateless mode with buffered JSON responses, which fits serverless.
+
+```bash
+npm i -g vercel
+vercel link                      # create/link the Vercel project
+vercel env add BACKLOG_BASE_URL
+vercel env add BACKLOG_API_KEY   # stored as a Vercel env var, never uploaded from .env
+vercel env add BACKLOG_PROJECT_KEY
+vercel deploy --prod
+```
+
+Then check `https://<your-deployment>.vercel.app/health` and point your MCP client at `https://<your-deployment>.vercel.app/mcp`.
+
+Notes:
+
+- `.vercelignore` excludes `.env`, so the API key only reaches Vercel through `vercel env add`.
+- `maxDuration` is set to 300s in `vercel.json` (requires Fluid compute, the default on current plans). Large batches wait 1s between writes, so keep batch sizes such that they finish within your plan's limit (~200 issues at 300s).
+- The warning below about authentication applies doubly here: a Vercel URL is public. Keep the URL secret or put the function behind auth before real use.
+
 ## 3. Test Backlog connectivity
 
 The quickest end-to-end check is calling a read-only tool through the MCP endpoint (see next section), but you can also test your credentials directly against Backlog:
@@ -158,12 +179,17 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_validate_issues` | Read — dry-run validation + preview, creates nothing |
 | `backlog_create_issue` | **Write** — creates one issue |
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |
+| `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`) |
+| `backlog_update_issues_batch` | **Write** — updates many issues sequentially, requires `confirmedByUser: true` |
 
 ## Project structure
 
 ```text
+api/
+└── index.ts          # Vercel serverless entrypoint (exports the Express app)
 src/
-├── index.ts          # HTTP server, MCP transport, health check
+├── index.ts          # Standalone entrypoint (Docker / npm start)
+├── app.ts            # Express app, MCP transport, health check
 ├── config.ts         # Environment validation (Zod)
 ├── backlog/
 │   ├── client.ts     # Backlog API v2 client: auth, errors, rate limits, key redaction
