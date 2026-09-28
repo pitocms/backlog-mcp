@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { BacklogClient } from "../backlog/client.js";
+import { BacklogApiError, type BacklogClient } from "../backlog/client.js";
 import type { BacklogCategory, BacklogIssueType, BacklogVersion } from "../backlog/types.js";
-import { jsonResult, safeHandler } from "./helpers.js";
+import { errorResult, jsonResult, safeHandler } from "./helpers.js";
 
 const dateSchema = z
   .string()
@@ -146,6 +146,76 @@ export function registerMetadataTools(server: McpServer, client: BacklogClient):
   );
 
   server.registerTool(
+    "backlog_update_milestone",
+    {
+      title: "Update a milestone/version",
+      description:
+        "Write: rename or update an existing milestone (version) of the configured project, by its id " +
+        "(from backlog_get_milestones). Only the fields provided are changed; archived true/false " +
+        "archives or unarchives it. Only call this after the user explicitly approved the change.",
+      inputSchema: {
+        milestoneId: z.number().int().positive(),
+        name: z.string().min(1).max(255).optional().describe("New name (omit to keep the current name)."),
+        description: z.string().optional(),
+        startDate: dateSchema.optional(),
+        releaseDueDate: dateSchema.optional(),
+        archived: z.boolean().optional(),
+      },
+    },
+    safeHandler(
+      async (args: {
+        milestoneId: number;
+        name?: string;
+        description?: string;
+        startDate?: string;
+        releaseDueDate?: string;
+        archived?: boolean;
+      }) => {
+        const { milestoneId, ...fields } = args;
+        if (Object.values(fields).every((value) => value === undefined)) {
+          return errorResult(
+            new BacklogApiError("No fields to update: provide at least one updatable field.")
+          );
+        }
+
+        // Backlog requires `name` on every version update, so resolve the
+        // current one when the caller is not renaming.
+        const milestones = await client.getMilestones();
+        const current = milestones.find((m) => m.id === milestoneId);
+        if (!current) {
+          return errorResult(
+            new BacklogApiError(
+              `milestoneId ${milestoneId} does not exist in this project (use backlog_get_milestones)`
+            )
+          );
+        }
+
+        const form = new URLSearchParams();
+        form.set("name", fields.name ?? current.name);
+        if (fields.description !== undefined) form.set("description", fields.description);
+        if (fields.startDate !== undefined) form.set("startDate", fields.startDate);
+        if (fields.releaseDueDate !== undefined) form.set("releaseDueDate", fields.releaseDueDate);
+        if (fields.archived !== undefined) form.set("archived", String(fields.archived));
+
+        const updated = await client.patchForm<BacklogVersion>(
+          `${projectPath}/versions/${milestoneId}`,
+          form
+        );
+        return jsonResult({
+          updated: true,
+          id: updated.id,
+          previousName: current.name,
+          name: updated.name,
+          description: updated.description,
+          startDate: updated.startDate,
+          releaseDueDate: updated.releaseDueDate,
+          archived: updated.archived,
+        });
+      }
+    )
+  );
+
+  server.registerTool(
     "backlog_add_category",
     {
       title: "Add a category",
@@ -161,6 +231,107 @@ export function registerMetadataTools(server: McpServer, client: BacklogClient):
       const created = await client.postForm<BacklogCategory>(`${projectPath}/categories`, form);
       return jsonResult({ created: true, id: created.id, name: created.name });
     })
+  );
+
+  server.registerTool(
+    "backlog_update_category",
+    {
+      title: "Update (rename) a category",
+      description:
+        "Write: rename an existing category of the configured project, by its id " +
+        "(from backlog_get_categories). Only call this after the user explicitly approved the change.",
+      inputSchema: {
+        categoryId: z.number().int().positive(),
+        name: z.string().min(1).max(255).describe("The new category name."),
+      },
+    },
+    safeHandler(async ({ categoryId, name }: { categoryId: number; name: string }) => {
+      const categories = await client.getCategories();
+      const current = categories.find((c) => c.id === categoryId);
+      if (!current) {
+        return errorResult(
+          new BacklogApiError(
+            `categoryId ${categoryId} does not exist in this project (use backlog_get_categories)`
+          )
+        );
+      }
+
+      const form = new URLSearchParams();
+      form.set("name", name);
+      const updated = await client.patchForm<BacklogCategory>(
+        `${projectPath}/categories/${categoryId}`,
+        form
+      );
+      return jsonResult({
+        updated: true,
+        id: updated.id,
+        previousName: current.name,
+        name: updated.name,
+      });
+    })
+  );
+
+  server.registerTool(
+    "backlog_update_issue_type",
+    {
+      title: "Update an issue type",
+      description:
+        "Write: rename and/or recolor an existing issue type of the configured project, by its id " +
+        "(from backlog_get_issue_types). Only the fields provided are changed. " +
+        "Only call this after the user explicitly approved the change.",
+      inputSchema: {
+        issueTypeId: z.number().int().positive(),
+        name: z.string().min(1).max(255).optional(),
+        color: z
+          .enum(ISSUE_TYPE_COLORS)
+          .optional()
+          .describe(
+            "One of Backlog's fixed issue-type colors: " + ISSUE_TYPE_COLORS.join(", ")
+          ),
+      },
+    },
+    safeHandler(
+      async ({
+        issueTypeId,
+        name,
+        color,
+      }: {
+        issueTypeId: number;
+        name?: string;
+        color?: string;
+      }) => {
+        if (name === undefined && color === undefined) {
+          return errorResult(
+            new BacklogApiError("No fields to update: provide name and/or color.")
+          );
+        }
+
+        const types = await client.getIssueTypes();
+        const current = types.find((t) => t.id === issueTypeId);
+        if (!current) {
+          return errorResult(
+            new BacklogApiError(
+              `issueTypeId ${issueTypeId} does not exist in this project (use backlog_get_issue_types)`
+            )
+          );
+        }
+
+        const form = new URLSearchParams();
+        if (name !== undefined) form.set("name", name);
+        if (color !== undefined) form.set("color", color);
+        const updated = await client.patchForm<BacklogIssueType>(
+          `${projectPath}/issueTypes/${issueTypeId}`,
+          form
+        );
+        return jsonResult({
+          updated: true,
+          id: updated.id,
+          previousName: current.name,
+          name: updated.name,
+          color: updated.color,
+        });
+      }
+    )
   );
 
   server.registerTool(

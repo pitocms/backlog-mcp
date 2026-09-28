@@ -218,8 +218,11 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`) |
 | `backlog_update_issues_batch` | **Write** — updates many issues sequentially, requires `confirmedByUser: true` |
 | `backlog_add_milestone` | **Write** — creates a milestone/version (name, description, start/release dates) |
+| `backlog_update_milestone` | **Write** — renames/updates/archives an existing milestone by id |
 | `backlog_add_category` | **Write** — creates a category |
+| `backlog_update_category` | **Write** — renames an existing category by id |
 | `backlog_add_issue_type` | **Write** — creates an issue type (name + one of Backlog's fixed colors) |
+| `backlog_update_issue_type` | **Write** — renames/recolors an existing issue type by id |
 
 ## Project structure
 
