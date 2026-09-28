@@ -84,7 +84,39 @@ Notes:
 
 - `.vercelignore` excludes `.env`, so the API key only reaches Vercel through `vercel env add`.
 - Fluid compute's default max duration is 300s. Large batches wait 1s between writes, so keep batch sizes such that they finish within your plan's limit (~200 issues at 300s).
-- The warning below about authentication applies doubly here: a Vercel URL is public. Keep the URL secret or put the function behind auth before real use.
+- A Vercel URL is public, so set `MCP_AUTH_TOKEN` (see **Authentication** below) before real use.
+
+## 2c. Authentication
+
+The server protects `/mcp` with a shared secret token. Without it, **anyone who can reach the URL can read and write your Backlog project** with your API key's permissions — fine on `localhost`, not fine on a public URL.
+
+**Enable it** by setting `MCP_AUTH_TOKEN` (≥16 characters):
+
+```bash
+openssl rand -hex 32                # generate a token
+
+# Docker: add MCP_AUTH_TOKEN=<token> to .env, then
+docker compose up -d
+
+# Vercel:
+vercel env add MCP_AUTH_TOKEN
+vercel deploy --prod
+```
+
+When the token is set, every request to `/mcp` must carry it in one of two ways; anything else gets `401 Unauthorized` (the comparison is timing-safe, and the token never appears in logs or error messages):
+
+| Client | How to authenticate |
+|---|---|
+| Clients with custom-header support, e.g. Claude Code (**preferred** — keeps the token out of URLs and logs) | `Authorization: Bearer <token>` header:<br>`claude mcp add --transport http backlog https://<host>/mcp --header "Authorization: Bearer <token>"` |
+| Clients without custom-header support, e.g. ChatGPT connectors | Token in the URL path: use `https://<host>/mcp/<token>` as the connector URL |
+
+Notes:
+
+- **ChatGPT's connector form asks for an "Authentication" method — choose "No authentication".** That setting only controls OAuth, which this server does not use; the token in the connector URL is what authenticates the requests. The full URL is then the secret: don't share or screenshot it.
+- `GET /health` stays unauthenticated on purpose — it reveals nothing and is used by health checks.
+- **Rotate** the token by changing `MCP_AUTH_TOKEN` and redeploying/restarting; old tokens and URLs stop working immediately. Rotate right away if a token-in-path URL may have leaked.
+- If `MCP_AUTH_TOKEN` is unset, the server runs **open** and logs a startup warning. There is no way to require auth per-client: it is all (token set) or nothing.
+- Scope of this scheme: it is a single shared secret, not per-user auth or OAuth. For a single-user or small-team internal tool this is the standard trade-off; if you need per-user identity or consent screens, put a real OAuth layer in front.
 
 ## 3. Test Backlog connectivity
 
@@ -99,7 +131,7 @@ A JSON object with your project's `id` and `name` means the URL, key, and projec
 
 ## 4. Test MCP tools with curl
 
-MCP over Streamable HTTP is JSON-RPC. List the tools:
+MCP over Streamable HTTP is JSON-RPC. List the tools (if `MCP_AUTH_TOKEN` is set, add `-H "Authorization: Bearer <token>"` to each request):
 
 ```bash
 curl -s http://localhost:3000/mcp \
@@ -131,18 +163,9 @@ The server must be reachable by the client. For ChatGPT (a cloud service), `loca
 - Deploy the container to a host with HTTPS (recommended for real use), or
 - Tunnel your local server for testing, e.g. `ngrok http 3000` or `cloudflared tunnel --url http://localhost:3000`.
 
-Then in ChatGPT: **Settings → Connectors → Add custom connector (MCP)** and enter `https://<your-host>/mcp`.
+Then in ChatGPT: **Settings → Connectors → Add custom connector (MCP)** and enter `https://<your-host>/mcp/<token>`, choosing **"No authentication"** in the form (see [Authentication](#2c-authentication)).
 
-> ⚠️ On any public URL, set `MCP_AUTH_TOKEN` — without it, anyone who can reach the URL can use your Backlog API key's permissions. With the token set, `/mcp` returns 401 unless the request carries the token.
->
-> - **ChatGPT** (no custom-header support): use the token-in-path URL as the connector URL: `https://<your-host>/mcp/<token>`. Treat that full URL as a secret.
-> - **Claude Code / clients with header support** (preferred, keeps the token out of URLs and logs):
->
->   ```bash
->   claude mcp add --transport http backlog https://<your-host>/mcp --header "Authorization: Bearer <token>"
->   ```
->
-> Rotate the token any time by changing `MCP_AUTH_TOKEN` and redeploying/restarting; old URLs stop working immediately.
+> ⚠️ On any public URL, set `MCP_AUTH_TOKEN` first — see [Authentication](#2c-authentication). Without it, anyone who can reach the URL can use your Backlog API key's permissions.
 
 For MCP clients that support local servers (Claude Code, Claude Desktop, etc.) you can point them at `http://localhost:3000/mcp` directly. Example for Claude Code:
 
@@ -194,13 +217,16 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |
 | `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`) |
 | `backlog_update_issues_batch` | **Write** — updates many issues sequentially, requires `confirmedByUser: true` |
+| `backlog_add_milestone` | **Write** — creates a milestone/version (name, description, start/release dates) |
+| `backlog_add_category` | **Write** — creates a category |
+| `backlog_add_issue_type` | **Write** — creates an issue type (name + one of Backlog's fixed colors) |
 
 ## Project structure
 
 ```text
 src/
 ├── index.ts          # Standalone entrypoint (Docker / npm start)
-├── app.ts            # Express app, MCP transport, health check; default export = Vercel entrypoint
+├── app.ts            # Express app, MCP transport, auth middleware, health check; default export = Vercel entrypoint
 ├── config.ts         # Environment validation (Zod)
 ├── backlog/
 │   ├── client.ts     # Backlog API v2 client: auth, errors, rate limits, key redaction
@@ -209,7 +235,7 @@ src/
 └── tools/
     ├── project.ts    # backlog_get_project
     ├── users.ts      # backlog_get_users
-    ├── metadata.ts   # issue types / priorities / categories / milestones
-    ├── issues.ts     # validate / create / batch create
+    ├── metadata.ts   # get + add: issue types / priorities / categories / milestones / statuses
+    ├── issues.ts     # list / validate / create / update, single + batch
     └── helpers.ts    # safe result + error formatting
 ```
