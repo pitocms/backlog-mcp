@@ -38,6 +38,7 @@ Then fill in:
 | `BACKLOG_API_KEY` | API key from Backlog: **Personal Settings → API → Register new API key** |
 | `BACKLOG_PROJECT_KEY` | The project key, e.g. `MYPROJ` (visible in the project URL and issue keys) |
 | `PORT` | Optional, defaults to `3000` |
+| `MCP_AUTH_TOKEN` | Optional but **strongly recommended on public URLs**: shared secret (≥16 chars, e.g. `openssl rand -hex 32`) required to call `/mcp` — via `Authorization: Bearer <token>` or the URL `/mcp/<token>` |
 
 `.env` is git-ignored. The API key is never printed in logs, error messages, or MCP responses.
 
@@ -73,6 +74,7 @@ vercel link                      # create/link the Vercel project
 vercel env add BACKLOG_BASE_URL
 vercel env add BACKLOG_API_KEY   # stored as a Vercel env var, never uploaded from .env
 vercel env add BACKLOG_PROJECT_KEY
+vercel env add MCP_AUTH_TOKEN     # strongly recommended: openssl rand -hex 32
 vercel deploy --prod
 ```
 
@@ -131,7 +133,16 @@ The server must be reachable by the client. For ChatGPT (a cloud service), `loca
 
 Then in ChatGPT: **Settings → Connectors → Add custom connector (MCP)** and enter `https://<your-host>/mcp`.
 
-> ⚠️ This server has no authentication layer of its own — anyone who can reach the URL can use your Backlog API key's permissions. Only expose it through a tunnel you control while testing, and shut the tunnel down afterwards. For anything long-lived, put it behind authentication.
+> ⚠️ On any public URL, set `MCP_AUTH_TOKEN` — without it, anyone who can reach the URL can use your Backlog API key's permissions. With the token set, `/mcp` returns 401 unless the request carries the token.
+>
+> - **ChatGPT** (no custom-header support): use the token-in-path URL as the connector URL: `https://<your-host>/mcp/<token>`. Treat that full URL as a secret.
+> - **Claude Code / clients with header support** (preferred, keeps the token out of URLs and logs):
+>
+>   ```bash
+>   claude mcp add --transport http backlog https://<your-host>/mcp --header "Authorization: Bearer <token>"
+>   ```
+>
+> Rotate the token any time by changing `MCP_AUTH_TOKEN` and redeploying/restarting; old URLs stop working immediately.
 
 For MCP clients that support local servers (Claude Code, Claude Desktop, etc.) you can point them at `http://localhost:3000/mcp` directly. Example for Claude Code:
 

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -37,10 +38,49 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+function tokensMatch(candidate: string, expected: string): boolean {
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// When MCP_AUTH_TOKEN is set, every /mcp request must carry it, either as
+// "Authorization: Bearer <token>" or in the path ("/mcp/<token>") for clients
+// that cannot send custom headers (e.g. ChatGPT custom connectors).
+const requireAuth: express.RequestHandler = (req, res, next) => {
+  const expected = config.mcpAuthToken;
+  if (!expected) return next();
+
+  const header = req.headers.authorization;
+  const bearer = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
+  const pathToken = typeof req.params.token === "string" ? req.params.token : undefined;
+  if (
+    (bearer !== undefined && tokensMatch(bearer, expected)) ||
+    (pathToken !== undefined && tokensMatch(pathToken, expected))
+  ) {
+    return next();
+  }
+
+  res.status(401).json({
+    jsonrpc: "2.0",
+    error: { code: -32001, message: "Unauthorized: missing or invalid MCP auth token" },
+    id: null,
+  });
+};
+
+if (!config.mcpAuthToken) {
+  console.warn(
+    "MCP_AUTH_TOKEN is not set: /mcp accepts unauthenticated requests. " +
+      "Set it before exposing this server on a public URL."
+  );
+}
+
+const MCP_PATHS = ["/mcp", "/mcp/:token"];
+
 // Stateless Streamable HTTP: a fresh server + transport per request, so no
 // session state is kept and requests are fully independent. JSON responses
 // (instead of SSE streams) keep this compatible with serverless platforms.
-app.post("/mcp", async (req, res) => {
+app.post(MCP_PATHS, requireAuth, async (req, res) => {
   const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -73,8 +113,8 @@ const methodNotAllowed = (_req: express.Request, res: express.Response) => {
     id: null,
   });
 };
-app.get("/mcp", methodNotAllowed);
-app.delete("/mcp", methodNotAllowed);
+app.get(MCP_PATHS, requireAuth, methodNotAllowed);
+app.delete(MCP_PATHS, requireAuth, methodNotAllowed);
 
 // Vercel's Express preset uses src/app.ts as the entrypoint and requires the
 // app to be the module's default export. Docker/npm start use src/index.ts.
