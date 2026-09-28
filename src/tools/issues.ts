@@ -1,0 +1,460 @@
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { BacklogApiError, type BacklogClient } from "../backlog/client.js";
+import { createIssue, issueUrl, updateIssue } from "../backlog/issues.js";
+import type { BacklogIssue, IssueUpdate, ProposedIssue } from "../backlog/types.js";
+import { errorResult, jsonResult, safeHandler } from "./helpers.js";
+
+const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "must be in yyyy-MM-dd format");
+
+const proposedIssueShape = {
+  summary: z.string().min(1, "summary is required").max(255),
+  description: z.string().optional(),
+  issueTypeId: z.number().int().positive(),
+  priorityId: z.number().int().positive(),
+  assigneeId: z.number().int().positive().optional(),
+  startDate: dateSchema.optional(),
+  dueDate: dateSchema.optional(),
+  estimatedHours: z.number().nonnegative().optional(),
+  categoryIds: z.array(z.number().int().positive()).optional(),
+  milestoneIds: z.array(z.number().int().positive()).optional(),
+  parentIssueId: z.number().int().positive().optional(),
+};
+
+const proposedIssueSchema = z.object(proposedIssueShape);
+
+const issueUpdateShape = {
+  issueTypeId: z.number().int().positive().optional(),
+  summary: z.string().min(1).max(255).optional(),
+  description: z.string().optional(),
+  priorityId: z.number().int().positive().optional(),
+  assigneeId: z.number().int().positive().optional(),
+  startDate: dateSchema.optional(),
+  dueDate: dateSchema.optional(),
+  estimatedHours: z.number().nonnegative().optional(),
+  categoryIds: z
+    .array(z.number().int().positive())
+    .optional()
+    .describe("Replaces the issue's categories; an empty array clears them."),
+  milestoneIds: z
+    .array(z.number().int().positive())
+    .optional()
+    .describe("Replaces the issue's milestones; an empty array clears them."),
+};
+
+const issueIdOrKeySchema = z
+  .string()
+  .min(1)
+  .describe("Issue ID or issue key, e.g. LMSDEV-80");
+
+const issueUpdatesArraySchema = z
+  .array(z.object({ issueIdOrKey: issueIdOrKeySchema, ...issueUpdateShape }))
+  .min(1, "provide at least one update")
+  .max(100, "at most 100 updates per call");
+
+/** The fields actually being changed, for reporting back to the caller. */
+function definedUpdateFields(update: IssueUpdate): Partial<IssueUpdate> {
+  return Object.fromEntries(
+    Object.entries(update).filter(([, value]) => value !== undefined)
+  ) as Partial<IssueUpdate>;
+}
+
+const issuesArraySchema = z
+  .array(proposedIssueSchema)
+  .min(1, "provide at least one issue")
+  .max(100, "at most 100 issues per call");
+
+interface ProjectMetadata {
+  projectId: number;
+  issueTypes: Map<number, string>;
+  priorities: Map<number, string>;
+  users: Map<number, string>;
+  categories: Map<number, string>;
+  milestones: Map<number, string>;
+}
+
+async function loadMetadata(client: BacklogClient): Promise<ProjectMetadata> {
+  const [project, issueTypes, priorities, users, categories, milestones] = await Promise.all([
+    client.getProject(),
+    client.getIssueTypes(),
+    client.getPriorities(),
+    client.getProjectUsers(),
+    client.getCategories(),
+    client.getMilestones(),
+  ]);
+  return {
+    projectId: project.id,
+    issueTypes: new Map(issueTypes.map((t) => [t.id, t.name])),
+    priorities: new Map(priorities.map((p) => [p.id, p.name])),
+    users: new Map(users.map((u) => [u.id, u.name])),
+    categories: new Map(categories.map((c) => [c.id, c.name])),
+    milestones: new Map(milestones.map((m) => [m.id, m.name])),
+  };
+}
+
+function isValidCalendarDate(value: string): boolean {
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return (
+    date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+  );
+}
+
+interface ValidationOutcome {
+  errors: string[];
+  preview: Record<string, unknown>;
+}
+
+async function validateIssue(
+  client: BacklogClient,
+  meta: ProjectMetadata,
+  issue: ProposedIssue,
+  parentCache: Map<number, BacklogIssue | null>
+): Promise<ValidationOutcome> {
+  const errors: string[] = [];
+
+  const issueTypeName = meta.issueTypes.get(issue.issueTypeId);
+  if (!issueTypeName) {
+    errors.push(
+      `issueTypeId ${issue.issueTypeId} does not exist in this project (use backlog_get_issue_types)`
+    );
+  }
+
+  const priorityName = meta.priorities.get(issue.priorityId);
+  if (!priorityName) {
+    errors.push(`priorityId ${issue.priorityId} is not a valid priority (use backlog_get_priorities)`);
+  }
+
+  let assigneeName: string | undefined;
+  if (issue.assigneeId !== undefined) {
+    assigneeName = meta.users.get(issue.assigneeId);
+    if (!assigneeName) {
+      errors.push(`assigneeId ${issue.assigneeId} is not a member of this project (use backlog_get_users)`);
+    }
+  }
+
+  for (const field of ["startDate", "dueDate"] as const) {
+    const value = issue[field];
+    if (value !== undefined && !isValidCalendarDate(value)) {
+      errors.push(`${field} "${value}" is not a valid calendar date`);
+    }
+  }
+  if (issue.startDate && issue.dueDate && issue.startDate > issue.dueDate) {
+    errors.push(`startDate ${issue.startDate} is after dueDate ${issue.dueDate}`);
+  }
+
+  const categoryNames: string[] = [];
+  for (const id of issue.categoryIds ?? []) {
+    const name = meta.categories.get(id);
+    if (name) categoryNames.push(name);
+    else errors.push(`categoryId ${id} does not exist in this project (use backlog_get_categories)`);
+  }
+
+  const milestoneNames: string[] = [];
+  for (const id of issue.milestoneIds ?? []) {
+    const name = meta.milestones.get(id);
+    if (name) milestoneNames.push(name);
+    else errors.push(`milestoneId ${id} does not exist in this project (use backlog_get_milestones)`);
+  }
+
+  let parentIssueKey: string | undefined;
+  if (issue.parentIssueId !== undefined) {
+    let parent = parentCache.get(issue.parentIssueId);
+    if (parent === undefined) {
+      try {
+        parent = await client.getIssue<BacklogIssue>(issue.parentIssueId);
+      } catch (err) {
+        parent = null;
+        if (!(err instanceof BacklogApiError && err.status === 404)) throw err;
+      }
+      parentCache.set(issue.parentIssueId, parent);
+    }
+    if (!parent) {
+      errors.push(`parentIssueId ${issue.parentIssueId} does not exist`);
+    } else if (parent.projectId !== meta.projectId) {
+      errors.push(`parentIssueId ${issue.parentIssueId} (${parent.issueKey}) belongs to a different project`);
+    } else if (parent.parentIssueId) {
+      errors.push(
+        `parentIssueId ${issue.parentIssueId} (${parent.issueKey}) is itself a child issue; Backlog does not allow nesting deeper than one level`
+      );
+    } else {
+      parentIssueKey = parent.issueKey;
+    }
+  }
+
+  const preview: Record<string, unknown> = {
+    summary: issue.summary,
+    issueType: issueTypeName ?? `UNKNOWN (id ${issue.issueTypeId})`,
+    priority: priorityName ?? `UNKNOWN (id ${issue.priorityId})`,
+  };
+  if (issue.description !== undefined) {
+    preview.description =
+      issue.description.length > 300
+        ? `${issue.description.slice(0, 300)}… (${issue.description.length} chars)`
+        : issue.description;
+  }
+  if (issue.assigneeId !== undefined) {
+    preview.assignee = assigneeName ?? `UNKNOWN (id ${issue.assigneeId})`;
+  }
+  if (issue.startDate) preview.startDate = issue.startDate;
+  if (issue.dueDate) preview.dueDate = issue.dueDate;
+  if (issue.estimatedHours !== undefined) preview.estimatedHours = issue.estimatedHours;
+  if (issue.categoryIds?.length) preview.categories = categoryNames;
+  if (issue.milestoneIds?.length) preview.milestones = milestoneNames;
+  if (issue.parentIssueId !== undefined) {
+    preview.parentIssue = parentIssueKey ?? `UNKNOWN (id ${issue.parentIssueId})`;
+  }
+
+  return { errors, preview };
+}
+
+/** Pause between write requests, per Backlog's rate limit guidance. */
+const BATCH_DELAY_MS = 1_000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function registerIssueTools(
+  server: McpServer,
+  client: BacklogClient,
+  baseUrl: string
+): void {
+  server.registerTool(
+    "backlog_validate_issues",
+    {
+      title: "Validate proposed issues (dry run)",
+      description:
+        "Validate one or more proposed issues against the configured Backlog project WITHOUT creating anything. " +
+        "Returns a human-reviewable preview of what would be created, plus per-issue errors. " +
+        "Always run this first and have the user review and approve the preview before calling any create tool.",
+      inputSchema: { issues: issuesArraySchema },
+    },
+    safeHandler(async ({ issues }: { issues: ProposedIssue[] }) => {
+      const meta = await loadMetadata(client);
+      const parentCache = new Map<number, BacklogIssue | null>();
+
+      const results = [];
+      for (const [index, issue] of issues.entries()) {
+        const { errors, preview } = await validateIssue(client, meta, issue, parentCache);
+        results.push({
+          index,
+          valid: errors.length === 0,
+          errors,
+          preview,
+        });
+      }
+
+      const invalidCount = results.filter((r) => !r.valid).length;
+      return jsonResult({
+        dryRun: true,
+        note: "No issues were created. Have the user review this preview and explicitly approve before creating.",
+        project: client.projectKey,
+        totalIssues: issues.length,
+        validIssues: issues.length - invalidCount,
+        invalidIssues: invalidCount,
+        results,
+      });
+    })
+  );
+
+  server.registerTool(
+    "backlog_create_issue",
+    {
+      title: "Create ONE Backlog issue",
+      description:
+        "Create a single issue in the configured Backlog project. " +
+        "Only call this after backlog_validate_issues succeeded and the user explicitly approved creation.",
+      inputSchema: proposedIssueShape,
+    },
+    safeHandler(async (issue: ProposedIssue) => {
+      const project = await client.getProject();
+      const created = await createIssue(client, project.id, issue);
+      return jsonResult({
+        created: true,
+        issueId: created.id,
+        issueKey: created.issueKey,
+        url: issueUrl(baseUrl, created.issueKey),
+        summary: created.summary,
+      });
+    })
+  );
+
+  server.registerTool(
+    "backlog_create_issues_batch",
+    {
+      title: "Create multiple Backlog issues",
+      description:
+        "Create multiple issues sequentially in the configured Backlog project. " +
+        "Issues are created one by one; a failure does not stop the remaining issues, and each result is reported. " +
+        "Only call this after backlog_validate_issues succeeded and the user explicitly approved creation. " +
+        "Set confirmedByUser to true only when the user has actually reviewed the validation preview and said to proceed.",
+      inputSchema: {
+        issues: issuesArraySchema,
+        confirmedByUser: z
+          .boolean()
+          .describe(
+            "Must be true, and only after the user explicitly approved creating these issues."
+          ),
+      },
+    },
+    async ({ issues, confirmedByUser }: { issues: ProposedIssue[]; confirmedByUser: boolean }) => {
+      if (!confirmedByUser) {
+        return errorResult(
+          new BacklogApiError(
+            "Refused: confirmedByUser is not true. Run backlog_validate_issues, show the preview to the user, and only retry after they explicitly approve."
+          )
+        );
+      }
+
+      let project;
+      try {
+        project = await client.getProject();
+      } catch (err) {
+        return errorResult(err);
+      }
+
+      const results = [];
+      for (const [index, issue] of issues.entries()) {
+        if (index > 0) await sleep(BATCH_DELAY_MS);
+        try {
+          const created = await createIssue(client, project.id, issue);
+          results.push({
+            index,
+            summary: issue.summary,
+            success: true,
+            issueId: created.id,
+            issueKey: created.issueKey,
+            url: issueUrl(baseUrl, created.issueKey),
+          });
+        } catch (err) {
+          results.push({
+            index,
+            summary: issue.summary,
+            success: false,
+            error:
+              err instanceof BacklogApiError
+                ? err.message
+                : "Unexpected error while creating this issue.",
+          });
+        }
+      }
+
+      const failed = results.filter((r) => !r.success).length;
+      return jsonResult({
+        totalIssues: issues.length,
+        created: issues.length - failed,
+        failed,
+        results,
+      });
+    }
+  );
+
+  server.registerTool(
+    "backlog_update_issue",
+    {
+      title: "Update ONE Backlog issue",
+      description:
+        "Update an existing Backlog issue by issue ID or issue key (e.g. LMSDEV-80). " +
+        "Only the fields provided are changed; categoryIds/milestoneIds replace the current lists " +
+        "(empty array clears them). Only call this after the user explicitly approved the change.",
+      inputSchema: { issueIdOrKey: issueIdOrKeySchema, ...issueUpdateShape },
+    },
+    safeHandler(async ({ issueIdOrKey, ...update }: { issueIdOrKey: string } & IssueUpdate) => {
+      const fields = definedUpdateFields(update);
+      if (Object.keys(fields).length === 0) {
+        return errorResult(
+          new BacklogApiError("No fields to update: provide at least one updatable field.")
+        );
+      }
+      const updated = await updateIssue(client, issueIdOrKey, fields);
+      return jsonResult({
+        updated: true,
+        issueId: updated.id,
+        issueKey: updated.issueKey,
+        url: issueUrl(baseUrl, updated.issueKey),
+        summary: updated.summary,
+        updatedFields: fields,
+      });
+    })
+  );
+
+  server.registerTool(
+    "backlog_update_issues_batch",
+    {
+      title: "Update multiple Backlog issues",
+      description:
+        "Update multiple existing issues sequentially, each identified by issue ID or issue key. " +
+        "A failure does not stop the remaining updates; each result is reported with the issue key " +
+        "and the fields that were changed. Only call this after the user explicitly approved the changes. " +
+        "Set confirmedByUser to true only when the user has actually reviewed the planned updates and said to proceed.",
+      inputSchema: {
+        updates: issueUpdatesArraySchema,
+        confirmedByUser: z
+          .boolean()
+          .describe(
+            "Must be true, and only after the user explicitly approved updating these issues."
+          ),
+      },
+    },
+    async ({
+      updates,
+      confirmedByUser,
+    }: {
+      updates: ({ issueIdOrKey: string } & IssueUpdate)[];
+      confirmedByUser: boolean;
+    }) => {
+      if (!confirmedByUser) {
+        return errorResult(
+          new BacklogApiError(
+            "Refused: confirmedByUser is not true. Show the user the planned updates and only retry after they explicitly approve."
+          )
+        );
+      }
+
+      const results = [];
+      for (const [index, { issueIdOrKey, ...update }] of updates.entries()) {
+        if (index > 0) await sleep(BATCH_DELAY_MS);
+        const fields = definedUpdateFields(update);
+        if (Object.keys(fields).length === 0) {
+          results.push({
+            index,
+            issueIdOrKey,
+            success: false,
+            error: "No fields to update: provide at least one updatable field.",
+          });
+          continue;
+        }
+        try {
+          const updated = await updateIssue(client, issueIdOrKey, fields);
+          results.push({
+            index,
+            issueIdOrKey,
+            success: true,
+            issueId: updated.id,
+            issueKey: updated.issueKey,
+            url: issueUrl(baseUrl, updated.issueKey),
+            updatedFields: fields,
+          });
+        } catch (err) {
+          results.push({
+            index,
+            issueIdOrKey,
+            success: false,
+            error:
+              err instanceof BacklogApiError
+                ? err.message
+                : "Unexpected error while updating this issue.",
+          });
+        }
+      }
+
+      const failed = results.filter((r) => !r.success).length;
+      return jsonResult({
+        totalUpdates: updates.length,
+        updated: updates.length - failed,
+        failed,
+        results,
+      });
+    }
+  );
+}
