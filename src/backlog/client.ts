@@ -1,10 +1,13 @@
 import type {
+  BacklogAttachment,
   BacklogCategory,
   BacklogComment,
+  BacklogCustomFieldSetting,
   BacklogIssue,
   BacklogIssueType,
   BacklogPriority,
   BacklogProject,
+  BacklogResolution,
   BacklogStatus,
   BacklogUser,
   BacklogVersion,
@@ -58,9 +61,9 @@ export class BacklogClient {
   }
 
   private async request<T>(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
-    options: { query?: QueryParams; form?: URLSearchParams } = {}
+    options: { query?: QueryParams; form?: URLSearchParams; multipart?: FormData } = {}
   ): Promise<T> {
     const url = this.buildUrl(path, options.query);
 
@@ -72,7 +75,7 @@ export class BacklogClient {
           headers: options.form
             ? { "Content-Type": "application/x-www-form-urlencoded" }
             : undefined,
-          body: options.form?.toString(),
+          body: options.form?.toString() ?? options.multipart,
         });
       } catch (err) {
         const detail = err instanceof Error ? this.redact(err.message) : "unknown error";
@@ -176,6 +179,18 @@ export class BacklogClient {
     return this.request("GET", "/priorities");
   }
 
+  getResolutions(): Promise<BacklogResolution[]> {
+    return this.request("GET", "/resolutions");
+  }
+
+  getCustomFields(): Promise<BacklogCustomFieldSetting[]> {
+    return this.request("GET", `/projects/${encodeURIComponent(this.projectKey)}/customFields`);
+  }
+
+  getIssueAttachments(issueIdOrKey: string): Promise<BacklogAttachment[]> {
+    return this.request("GET", `/issues/${encodeURIComponent(issueIdOrKey)}/attachments`);
+  }
+
   getCategories(): Promise<BacklogCategory[]> {
     return this.request("GET", `/projects/${encodeURIComponent(this.projectKey)}/categories`);
   }
@@ -217,5 +232,50 @@ export class BacklogClient {
 
   patchForm<T>(path: string, form: URLSearchParams): Promise<T> {
     return this.request("PATCH", path, { form });
+  }
+
+  /** DELETE endpoints; Backlog takes any parameters as a form body. */
+  deleteForm<T>(path: string, form?: URLSearchParams): Promise<T> {
+    return this.request("DELETE", path, form ? { form } : {});
+  }
+
+  postMultipart<T>(path: string, multipart: FormData): Promise<T> {
+    return this.request("POST", path, { multipart });
+  }
+
+  /** Download a binary resource (e.g. an attachment). No rate-limit retry: 429 surfaces as an error. */
+  async downloadRaw(
+    path: string
+  ): Promise<{ data: Buffer; contentType: string | null; filename: string | null }> {
+    const url = this.buildUrl(path);
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (err) {
+      const detail = err instanceof Error ? this.redact(err.message) : "unknown error";
+      throw new BacklogApiError(
+        `Network error while contacting Backlog (${detail}). Check BACKLOG_BASE_URL and your network connection.`
+      );
+    }
+    if (!response.ok) {
+      throw await this.toApiError(response, path);
+    }
+
+    // Content-Disposition: attachment; filename*=UTF-8''<url-encoded name>
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    let filename: string | null = null;
+    try {
+      filename = encoded ? decodeURIComponent(encoded) : plain ?? null;
+    } catch {
+      filename = plain ?? null;
+    }
+
+    return {
+      data: Buffer.from(await response.arrayBuffer()),
+      contentType: response.headers.get("Content-Type"),
+      filename,
+    };
   }
 }

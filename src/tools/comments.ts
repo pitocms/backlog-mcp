@@ -1,7 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { BacklogApiError, type BacklogClient, type QueryParams } from "../backlog/client.js";
-import { addComment, commentUrl, quoteComment } from "../backlog/comments.js";
+import {
+  addComment,
+  commentUrl,
+  deleteComment,
+  quoteComment,
+  updateComment,
+} from "../backlog/comments.js";
 import type { BacklogComment, BacklogIssue } from "../backlog/types.js";
 import { jsonResult, safeHandler } from "./helpers.js";
 
@@ -94,6 +100,10 @@ export function registerCommentTools(
           .array(z.number().int().positive())
           .optional()
           .describe("Project member ids (from backlog_get_users) to notify about this comment."),
+        attachmentIds: z
+          .array(z.number().int().positive())
+          .optional()
+          .describe("Space attachment ids (from backlog_upload_attachment) to attach to this comment."),
       },
     },
     safeHandler(
@@ -102,6 +112,7 @@ export function registerCommentTools(
         content: string;
         replyToCommentId?: number;
         notifiedUserIds?: number[];
+        attachmentIds?: number[];
       }) => {
         let content = args.content;
         const notifiedUserIds = new Set(args.notifiedUserIds ?? []);
@@ -135,7 +146,13 @@ export function registerCommentTools(
         }
 
         const issue = await client.getIssue<BacklogIssue>(args.issueIdOrKey);
-        const created = await addComment(client, args.issueIdOrKey, content, [...notifiedUserIds]);
+        const created = await addComment(
+          client,
+          args.issueIdOrKey,
+          content,
+          [...notifiedUserIds],
+          args.attachmentIds
+        );
 
         return jsonResult({
           commented: true,
@@ -148,5 +165,61 @@ export function registerCommentTools(
         });
       }
     )
+  );
+
+  server.registerTool(
+    "backlog_update_comment",
+    {
+      title: "Edit a comment on a Backlog issue",
+      description:
+        "Write: replace the content of an existing comment, by issue ID or key and comment id " +
+        "(from backlog_list_comments). Backlog only allows editing comments written by the API key's own " +
+        "user. Only call this after the user approved the new text.",
+      inputSchema: {
+        issueIdOrKey: issueIdOrKeySchema,
+        commentId: z.number().int().positive(),
+        content: z.string().min(1, "content is required").max(8000).describe("The full replacement text."),
+      },
+    },
+    safeHandler(
+      async (args: { issueIdOrKey: string; commentId: number; content: string }) => {
+        const issue = await client.getIssue<BacklogIssue>(args.issueIdOrKey);
+        const edited = await updateComment(client, args.issueIdOrKey, args.commentId, args.content);
+        return jsonResult({
+          updated: true,
+          issueKey: issue.issueKey,
+          commentId: edited.id,
+          content: edited.content,
+          author: edited.createdUser?.name ?? null,
+          url: commentUrl(baseUrl, issue.issueKey, edited.id),
+        });
+      }
+    )
+  );
+
+  server.registerTool(
+    "backlog_delete_comment",
+    {
+      title: "Delete a comment from a Backlog issue (irreversible)",
+      description:
+        "Write: permanently delete a comment, by issue ID or key and comment id (from backlog_list_comments). " +
+        "This cannot be undone, and Backlog only allows deleting comments written by the API key's own user. " +
+        "Show the user the comment and only call this after they explicitly approved deleting it.",
+      inputSchema: {
+        issueIdOrKey: issueIdOrKeySchema,
+        commentId: z.number().int().positive(),
+      },
+    },
+    safeHandler(async (args: { issueIdOrKey: string; commentId: number }) => {
+      const issue = await client.getIssue<BacklogIssue>(args.issueIdOrKey);
+      const deleted = await deleteComment(client, args.issueIdOrKey, args.commentId);
+      return jsonResult({
+        deleted: true,
+        issueKey: issue.issueKey,
+        commentId: deleted.id,
+        content: deleted.content,
+        author: deleted.createdUser?.name ?? null,
+      });
+    })
   );
 }

@@ -5,10 +5,15 @@ import type { BacklogComment } from "./types.js";
  * Build the form body for POST /api/v2/issues/:issueIdOrKey/comments.
  * Array parameters use the `name[]` convention required by the Backlog API.
  */
-export function buildCommentForm(content: string, notifiedUserIds?: number[]): URLSearchParams {
+export function buildCommentForm(
+  content: string,
+  notifiedUserIds?: number[],
+  attachmentIds?: number[]
+): URLSearchParams {
   const form = new URLSearchParams();
   form.set("content", content);
   for (const id of notifiedUserIds ?? []) form.append("notifiedUserId[]", String(id));
+  for (const id of attachmentIds ?? []) form.append("attachmentId[]", String(id));
   return form;
 }
 
@@ -16,11 +21,36 @@ export async function addComment(
   client: BacklogClient,
   issueIdOrKey: string,
   content: string,
-  notifiedUserIds?: number[]
+  notifiedUserIds?: number[],
+  attachmentIds?: number[]
 ): Promise<BacklogComment> {
   return client.postForm<BacklogComment>(
     `/issues/${encodeURIComponent(issueIdOrKey)}/comments`,
-    buildCommentForm(content, notifiedUserIds)
+    buildCommentForm(content, notifiedUserIds, attachmentIds)
+  );
+}
+
+export async function updateComment(
+  client: BacklogClient,
+  issueIdOrKey: string,
+  commentId: number,
+  content: string
+): Promise<BacklogComment> {
+  const form = new URLSearchParams();
+  form.set("content", content);
+  return client.patchForm<BacklogComment>(
+    `/issues/${encodeURIComponent(issueIdOrKey)}/comments/${commentId}`,
+    form
+  );
+}
+
+export async function deleteComment(
+  client: BacklogClient,
+  issueIdOrKey: string,
+  commentId: number
+): Promise<BacklogComment> {
+  return client.deleteForm<BacklogComment>(
+    `/issues/${encodeURIComponent(issueIdOrKey)}/comments/${commentId}`
   );
 }
 

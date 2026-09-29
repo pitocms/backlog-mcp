@@ -213,19 +213,36 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_get_milestones` | Read — project milestones/versions |
 | `backlog_list_issues` | Read — list/search issues, filterable by status name or id, assignee, keyword; paged |
 | `backlog_get_issue` | Read — full details of one issue by ID or key, including description |
+| `backlog_get_resolutions` | Read — resolutions (Fixed, Won't Fix, …) + IDs |
+| `backlog_get_custom_fields` | Read — project custom fields, their types and list items |
 | `backlog_list_comments` | Read — comments of one issue, paged, newest first |
-| `backlog_add_comment` | **Write** — adds a comment to an issue; with `replyToCommentId` it quotes the original and notifies its author |
+| `backlog_add_comment` | **Write** — adds a comment to an issue (optionally with attachments); with `replyToCommentId` it quotes the original and notifies its author |
+| `backlog_update_comment` | **Write** — edits an own comment's content |
+| `backlog_delete_comment` | **Write** — permanently deletes an own comment |
+| `backlog_list_attachments` | Read — files attached to one issue |
+| `backlog_download_attachment` | Read — downloads one attachment (text inline, binary as base64, ≤2MB) |
+| `backlog_upload_attachment` | **Write** — uploads a file (base64, ≤10MB); attach via `attachmentIds` of update issue / add comment |
+| `backlog_delete_attachment` | **Write** — permanently removes one attachment from an issue |
 | `backlog_validate_issues` | Read — dry-run validation + preview, creates nothing |
 | `backlog_create_issue` | **Write** — creates one issue |
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |
-| `backlog_update_issue` | **Write** — updates one existing issue by ID or key (e.g. `LMSDEV-80`), including its status via `statusId` |
+| `backlog_update_issue` | **Write** — updates one existing issue by ID or key: status, resolution, parent, actual hours, attachments, custom fields, and all standard fields |
 | `backlog_update_issues_batch` | **Write** — updates many issues sequentially, requires `confirmedByUser: true` |
+| `backlog_delete_issue` | **Write** — permanently deletes an issue (with comments/attachments), requires `confirmedByUser: true` |
 | `backlog_add_milestone` | **Write** — creates a milestone/version (name, description, start/release dates) |
 | `backlog_update_milestone` | **Write** — renames/updates/archives an existing milestone by id |
+| `backlog_delete_milestone` | **Write** — permanently deletes a milestone by id |
 | `backlog_add_category` | **Write** — creates a category |
 | `backlog_update_category` | **Write** — renames an existing category by id |
+| `backlog_delete_category` | **Write** — permanently deletes a category by id |
 | `backlog_add_issue_type` | **Write** — creates an issue type (name + one of Backlog's fixed colors) |
 | `backlog_update_issue_type` | **Write** — renames/recolors an existing issue type by id |
+| `backlog_delete_issue_type` | **Write** — permanently deletes an issue type; issues move to `substituteIssueTypeId` |
+| `backlog_add_status` | **Write** — creates a custom issue status (plan-dependent) |
+| `backlog_update_status` | **Write** — renames/recolors a custom status by id |
+| `backlog_delete_status` | **Write** — permanently deletes a custom status; issues move to `substituteStatusId` |
+| `backlog_add_project_user` | **Write** — adds a space member to the project (admin rights required) |
+| `backlog_remove_project_user` | **Write** — removes a member from the project (admin rights required) |
 
 ## Project structure
 

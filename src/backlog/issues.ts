@@ -43,6 +43,25 @@ export function buildIssueUpdateForm(update: IssueUpdate): URLSearchParams {
   if (update.estimatedHours !== undefined) {
     form.set("estimatedHours", String(update.estimatedHours));
   }
+  if (update.actualHours !== undefined) {
+    form.set("actualHours", String(update.actualHours));
+  }
+  if (update.parentIssueId !== undefined) {
+    // Empty value detaches the child from its parent.
+    form.set("parentIssueId", update.parentIssueId === null ? "" : String(update.parentIssueId));
+  }
+  if (update.resolutionId !== undefined) {
+    // Empty value clears the resolution.
+    form.set("resolutionId", update.resolutionId === null ? "" : String(update.resolutionId));
+  }
+  for (const id of update.attachmentIds ?? []) form.append("attachmentId[]", String(id));
+  for (const field of update.customFields ?? []) {
+    const values = Array.isArray(field.value) ? field.value : [field.value];
+    for (const value of values) form.append(`customField_${field.id}`, String(value));
+    if (field.otherValue !== undefined) {
+      form.set(`customField_${field.id}_otherValue`, field.otherValue);
+    }
+  }
   if (update.categoryIds !== undefined) {
     if (update.categoryIds.length === 0) form.append("categoryId[]", "");
     for (const id of update.categoryIds) form.append("categoryId[]", String(id));

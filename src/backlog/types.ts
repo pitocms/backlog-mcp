@@ -77,6 +77,36 @@ export interface BacklogIssue {
   updated: string | null;
 }
 
+export interface BacklogResolution {
+  id: number;
+  name: string;
+}
+
+export interface BacklogAttachment {
+  id: number;
+  name: string;
+  size: number;
+  createdUser?: BacklogUser | null;
+  created?: string;
+}
+
+export interface BacklogCustomFieldSetting {
+  id: number;
+  typeId: number;
+  name: string;
+  description: string | null;
+  required: boolean;
+  applicableIssueTypes: number[];
+  items?: { id: number; name: string; displayOrder: number }[];
+}
+
+/** One custom-field value to set on an issue (customField_{id} form params). */
+export interface CustomFieldValue {
+  id: number;
+  value: string | number | (string | number)[];
+  otherValue?: string;
+}
+
 export interface BacklogComment {
   id: number;
   content: string | null;
@@ -105,8 +135,16 @@ export interface IssueUpdate {
   startDate?: string;
   dueDate?: string;
   estimatedHours?: number;
+  actualHours?: number;
+  /** null detaches the issue from its parent. */
+  parentIssueId?: number | null;
+  /** null clears the resolution. */
+  resolutionId?: number | null;
   categoryIds?: number[];
   milestoneIds?: number[];
+  /** Space attachment ids (from backlog_upload_attachment) to attach to the issue. */
+  attachmentIds?: number[];
+  customFields?: CustomFieldValue[];
 }
 
 /** Input shape for creating an issue (validated by Zod at the tool layer). */

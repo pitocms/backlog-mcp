@@ -30,6 +30,19 @@ const proposedIssueShape = {
 
 const proposedIssueSchema = z.object(proposedIssueShape);
 
+const customFieldValueSchema = z.object({
+  id: z.number().int().positive().describe("Custom field id (from backlog_get_custom_fields)."),
+  value: z
+    .union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))])
+    .describe(
+      "The value: text/number/date string, a list item id for single-list fields, or an array of item ids for multiple-list fields."
+    ),
+  otherValue: z
+    .string()
+    .optional()
+    .describe('Free-text value for list fields that allow "other".'),
+});
+
 const issueUpdateShape = {
   issueTypeId: z.number().int().positive().optional(),
   summary: z.string().min(1).max(255).optional(),
@@ -45,6 +58,29 @@ const issueUpdateShape = {
   startDate: dateSchema.optional(),
   dueDate: dateSchema.optional(),
   estimatedHours: z.number().nonnegative().optional(),
+  actualHours: z.number().nonnegative().optional(),
+  parentIssueId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .describe("New parent issue id; null detaches the issue from its current parent."),
+  resolutionId: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .describe("Resolution id (from backlog_get_resolutions); null clears the resolution."),
+  attachmentIds: z
+    .array(z.number().int().positive())
+    .optional()
+    .describe("Space attachment ids (from backlog_upload_attachment) to attach to the issue."),
+  customFields: z
+    .array(customFieldValueSchema)
+    .optional()
+    .describe("Custom-field values to set (see backlog_get_custom_fields for ids and types)."),
   categoryIds: z
     .array(z.number().int().positive())
     .optional()
@@ -515,8 +551,9 @@ export function registerIssueTools(
       title: "Update ONE Backlog issue",
       description:
         "Update an existing Backlog issue by issue ID or issue key (e.g. LMSDEV-80). " +
-        "Only the fields provided are changed, including the status (statusId, via backlog_get_statuses); " +
-        "categoryIds/milestoneIds replace the current lists " +
+        "Only the fields provided are changed: status (statusId), resolution (resolutionId, null clears), " +
+        "parent issue (parentIssueId, null detaches), actual hours, attachments, custom fields, and the " +
+        "standard fields; categoryIds/milestoneIds replace the current lists " +
         "(empty array clears them). Only call this after the user explicitly approved the change.",
       inputSchema: { issueIdOrKey: issueIdOrKeySchema, ...issueUpdateShape },
     },
@@ -617,5 +654,42 @@ export function registerIssueTools(
         results,
       });
     }
+  );
+
+  server.registerTool(
+    "backlog_delete_issue",
+    {
+      title: "Delete a Backlog issue (irreversible)",
+      description:
+        "Write: permanently delete an issue by issue ID or issue key (e.g. LMSDEV-80), including all its " +
+        "comments and attachments. This cannot be undone. Show the user the issue (backlog_get_issue) and " +
+        "set confirmedByUser to true only after they explicitly approved deleting exactly this issue.",
+      inputSchema: {
+        issueIdOrKey: issueIdOrKeySchema,
+        confirmedByUser: z
+          .boolean()
+          .describe("Must be true, and only after the user explicitly approved deleting this issue."),
+      },
+    },
+    safeHandler(
+      async ({ issueIdOrKey, confirmedByUser }: { issueIdOrKey: string; confirmedByUser: boolean }) => {
+        if (!confirmedByUser) {
+          return errorResult(
+            new BacklogApiError(
+              "Refused: confirmedByUser is not true. Show the user the issue and only retry after they explicitly approve deleting it."
+            )
+          );
+        }
+        const deleted = await client.deleteForm<BacklogIssue>(
+          `/issues/${encodeURIComponent(issueIdOrKey)}`
+        );
+        return jsonResult({
+          deleted: true,
+          issueId: deleted.id,
+          issueKey: deleted.issueKey,
+          summary: deleted.summary,
+        });
+      }
+    )
   );
 }

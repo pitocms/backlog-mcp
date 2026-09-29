@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Contains the MCP auth token in its URL
+.mcp.json
 
 # Dependencies
 node_modules/
