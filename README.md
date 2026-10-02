@@ -223,6 +223,11 @@ The response contains the created `issueKey` and a direct `url` to the issue.
 | `backlog_download_attachment` | Read — downloads one attachment (text inline, binary as base64, ≤2MB) |
 | `backlog_upload_attachment` | **Write** — uploads a file (base64, ≤10MB); attach via `attachmentIds` of update issue / add comment |
 | `backlog_delete_attachment` | **Write** — permanently removes one attachment from an issue |
+| `backlog_list_wikis` | Read — wiki pages of a project (any project via `projectIdOrKey`), optional keyword |
+| `backlog_get_wiki` | Read — one wiki page with full content, by id or exact name (e.g. `Home`) |
+| `backlog_create_wiki` | **Write** — adds a wiki page (`/` in the name nests it under a parent page) |
+| `backlog_update_wiki` | **Write** — renames a wiki page and/or replaces its full content |
+| `backlog_delete_wiki` | **Write** — permanently deletes a wiki page, requires `confirmedByUser: true` |
 | `backlog_validate_issues` | Read — dry-run validation + preview, creates nothing |
 | `backlog_create_issue` | **Write** — creates one issue |
 | `backlog_create_issues_batch` | **Write** — creates many issues sequentially, requires `confirmedByUser: true` |
@@ -254,11 +259,13 @@ src/
 ├── backlog/
 │   ├── client.ts     # Backlog API v2 client: auth, errors, rate limits, key redaction
 │   ├── types.ts      # Backlog response types
-│   └── issues.ts     # Issue creation payload building
+│   ├── issues.ts     # Issue creation payload building
+│   └── wikis.ts      # Wiki create/update/delete payloads + page URLs
 └── tools/
     ├── project.ts    # backlog_get_project
     ├── users.ts      # backlog_get_users
     ├── metadata.ts   # get + add: issue types / priorities / categories / milestones / statuses
     ├── issues.ts     # list / validate / create / update, single + batch
+    ├── wikis.ts      # list / get / create / update / delete wiki pages
     └── helpers.ts    # safe result + error formatting
 ```

@@ -10,6 +10,7 @@ import { registerMetadataTools } from "./tools/metadata.js";
 import { registerIssueTools } from "./tools/issues.js";
 import { registerCommentTools } from "./tools/comments.js";
 import { registerAttachmentTools } from "./tools/attachments.js";
+import { registerWikiTools } from "./tools/wikis.js";
 
 export const config = loadConfig();
 const client = new BacklogClient(config.baseUrl, config.apiKey, config.projectKey);
@@ -25,6 +26,7 @@ function createMcpServer(): McpServer {
   registerIssueTools(server, client, config.baseUrl);
   registerCommentTools(server, client, config.baseUrl);
   registerAttachmentTools(server, client);
+  registerWikiTools(server, client, config.baseUrl);
   return server;
 }
 

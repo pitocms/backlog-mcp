@@ -115,6 +115,20 @@ export interface BacklogComment {
   updated: string | null;
 }
 
+export interface BacklogWiki {
+  id: number;
+  projectId: number;
+  name: string;
+  /** Present on GET /wikis/:wikiId and write responses; omitted from the list endpoint. */
+  content?: string | null;
+  tags?: { id: number; name: string }[];
+  attachments?: BacklogAttachment[];
+  createdUser: BacklogUser | null;
+  created: string;
+  updatedUser: BacklogUser | null;
+  updated: string | null;
+}
+
 /** Full issue detail as returned by GET /api/v2/issues/:issueIdOrKey. */
 export interface BacklogIssueDetail extends BacklogIssue {
   description: string | null;

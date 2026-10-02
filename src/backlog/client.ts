@@ -11,6 +11,7 @@ import type {
   BacklogStatus,
   BacklogUser,
   BacklogVersion,
+  BacklogWiki,
 } from "./types.js";
 
 /** Query params for GET endpoints; array values become repeated `name` params. */
@@ -224,6 +225,21 @@ export class BacklogClient {
       "GET",
       `/issues/${encodeURIComponent(issueIdOrKey)}/comments/${commentId}`
     );
+  }
+
+  /** Any project by id or key (wikis may live outside the configured project). */
+  getProjectByIdOrKey(projectIdOrKey: string): Promise<BacklogProject> {
+    return this.request("GET", `/projects/${encodeURIComponent(projectIdOrKey)}`);
+  }
+
+  getWikis(projectIdOrKey: string, keyword?: string): Promise<BacklogWiki[]> {
+    const query: QueryParams = { projectIdOrKey };
+    if (keyword) query.keyword = keyword;
+    return this.request("GET", "/wikis", { query });
+  }
+
+  getWiki(wikiId: number): Promise<BacklogWiki> {
+    return this.request("GET", `/wikis/${wikiId}`);
   }
 
   postForm<T>(path: string, form: URLSearchParams): Promise<T> {
